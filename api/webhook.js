@@ -75,6 +75,19 @@ export default async function handler(req, res) {
     const assignee = payload.issue?.fields?.assignee?.displayName || 'Sin asignar';
     const dueDate = payload.issue?.fields?.duedate || 'Sin fecha';
     const status = payload.issue?.fields?.status?.name || 'Desconocido';
+    const timeSpent = payload.issue?.fields?.timetracking?.timeSpent || '0h';
+    
+    // SOLUCIÓN BUG: Ignorar webhooks duplicados (ej. al cambiar de Done a To Do, Jira manda otro solo por 'resolution')
+    if (action === 'updated' && payload.changelog && payload.changelog.items) {
+      const changedFields = payload.changelog.items.map(item => item.field);
+      const isImportantChange = changedFields.some(field => 
+        ['status', 'assignee', 'summary', 'description', 'priority'].includes(field)
+      );
+      if (!isImportantChange) {
+        console.log(`Evento ignorado para ${issueKey}. Cambios menores:`, changedFields);
+        return res.status(200).json({ success: true, message: 'Evento ignorado (cambio menor/duplicado)' });
+      }
+    }
     
     // Si el evento es creación o actualización, podemos tomar la fecha de actualización del payload como fecha de la actividad.
     const activityDate = payload.issue?.fields?.updated || payload.issue?.fields?.created || new Date().toISOString();
@@ -91,13 +104,24 @@ export default async function handler(req, res) {
       { name: 'Asignado por / Autor', value: user, inline: true },
       { name: 'Asignado a', value: assignee, inline: true },
       { name: 'Estado', value: status, inline: true },
-      { name: 'Fecha de asignación/actividad', value: formattedDate, inline: true },
+      { name: 'Tiempo invertido', value: timeSpent, inline: true },
+      { name: 'Fecha de actividad', value: formattedDate, inline: true },
       { name: 'Fecha de vencimiento', value: dueDate, inline: true }
     ];
     
-    if (action === 'created') color = 3066993; // Verde
-    else if (action === 'updated') color = 16753920; // Naranja
-    else if (action === 'deleted') color = 15158332; // Rojo
+    // Lógica de colores basada en el ESTADO
+    const statusLower = status.toLowerCase();
+    if (action === 'deleted') {
+      color = 15158332; // Rojo (Eliminada siempre es rojo)
+    } else if (statusLower.includes('done') || statusLower.includes('completado') || statusLower.includes('listo')) {
+      color = 3447003; // Azul
+    } else if (statusLower.includes('review') || statusLower.includes('revisión')) {
+      color = 16753920; // Naranja
+    } else if (statusLower.includes('progress') || statusLower.includes('progresive') || statusLower.includes('curso')) {
+      color = 10181046; // Púrpura
+    } else {
+      color = 3066993; // Verde (Nuevo / To Do / Por defecto)
+    }
 
   } else if (eventType.startsWith('comment_')) {
     const action = eventType.replace('comment_', '');
