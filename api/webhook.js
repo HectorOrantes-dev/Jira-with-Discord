@@ -70,11 +70,11 @@ export default async function handler(req, res) {
     const action = eventType.replace('jira:issue_', '');
     const issueKey = payload.issue?.key || 'Desconocido';
     const summary = payload.issue?.fields?.summary || 'Sin resumen';
-    const url = payload.issue?.self ? `\n\n**Enlace API:** ${payload.issue.self}` : '';
     
     // Extracción de nuevos campos
     const assignee = payload.issue?.fields?.assignee?.displayName || 'Sin asignar';
     const dueDate = payload.issue?.fields?.duedate || 'Sin fecha';
+    const status = payload.issue?.fields?.status?.name || 'Desconocido';
     
     // Si el evento es creación o actualización, podemos tomar la fecha de actualización del payload como fecha de la actividad.
     const activityDate = payload.issue?.fields?.updated || payload.issue?.fields?.created || new Date().toISOString();
@@ -85,11 +85,12 @@ export default async function handler(req, res) {
     });
 
     title = `Incidencia ${action === 'created' ? 'creada' : action === 'updated' ? 'actualizada' : 'eliminada'}: ${issueKey}`;
-    description = `**Resumen:** ${summary}${url}`;
+    description = `**Resumen:** ${summary}`;
     
     embedFields = [
       { name: 'Asignado por / Autor', value: user, inline: true },
       { name: 'Asignado a', value: assignee, inline: true },
+      { name: 'Estado', value: status, inline: true },
       { name: 'Fecha de asignación/actividad', value: formattedDate, inline: true },
       { name: 'Fecha de vencimiento', value: dueDate, inline: true }
     ];
