@@ -1,0 +1,21 @@
+{
+  "name": "jira-discord-webhook",
+  "version": "1.0.0",
+  "description": "Backend Serverless en Vercel para conectar webhooks de Jira a Discord",
+  "main": "api/webhook.js",
+  "type": "module",
+  "scripts": {
+    "start": "node api/webhook.js"
+  },
+  "keywords": [
+    "jira",
+    "discord",
+    "webhook",
+    "vercel"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
