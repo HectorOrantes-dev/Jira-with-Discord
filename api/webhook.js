@@ -8,14 +8,37 @@ export const config = {
   },
 };
 
-async function createGithubBranch(issueType, issueKey, summary) {
+// Diccionario de enrutamiento: Etiqueta de Jira -> Repositorio de GitHub
+const repoMapping = {
+  'repo:bot': 'visionpricebotrecolector',
+  'repo:prov-back': 'visionpriceproveedoresbackend',
+  'repo:prov-front': 'visionpriceproveedores',
+  'repo:backend': 'visionpricebackend',
+  'repo:app': 'visionprice'
+};
+
+function determineTargetRepo(labels) {
+  if (!labels || !Array.isArray(labels)) return null;
+  for (const label of labels) {
+    const lowerLabel = label.toLowerCase();
+    if (repoMapping[lowerLabel]) {
+      return repoMapping[lowerLabel];
+    }
+  }
+  return null;
+}
+
+async function createGithubBranch(issueType, issueKey, summary, targetRepo) {
   const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPO; // ej. "Usuario/Proyecto"
+  // Extraer la organización (ej. HectorOrantes-dev)
+  const org = process.env.GITHUB_ORG || process.env.GITHUB_REPO?.split('/')[0];
   
-  if (!token || !repo) {
-    console.error("Faltan credenciales de GitHub (GITHUB_TOKEN o GITHUB_REPO)");
+  if (!token || !org || !targetRepo) {
+    console.error("Faltan credenciales o no se definió el repositorio destino.");
     return;
   }
+
+  const repo = `${org}/${targetRepo}`;
 
   // Determinar el prefijo de la rama basado en el tipo de tarea de Jira
   const typeLower = issueType.toLowerCase();
@@ -82,11 +105,13 @@ async function createGithubBranch(issueType, issueKey, summary) {
   }
 }
 
-async function deleteGithubBranch(issueType, issueKey, summary) {
+async function deleteGithubBranch(issueType, issueKey, summary, targetRepo) {
   const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPO;
+  const org = process.env.GITHUB_ORG || process.env.GITHUB_REPO?.split('/')[0];
   
-  if (!token || !repo) return;
+  if (!token || !org || !targetRepo) return;
+
+  const repo = `${org}/${targetRepo}`;
 
   const typeLower = issueType.toLowerCase();
   let prefix = 'feature';
@@ -324,9 +349,15 @@ export default async function handler(req, res) {
       if (!typeLower.includes('epic') && !typeLower.includes('épica')) {
         const issueKey = payload.issue?.key || 'Desconocido';
         const summary = payload.issue?.fields?.summary || 'sin-resumen';
+        const labels = payload.issue?.fields?.labels || [];
         
-        // Creamos la rama dinámicamente con su tipo (Feature, Bug, Task, etc.)
-        promises.push(createGithubBranch(issueType, issueKey, summary));
+        const targetRepo = determineTargetRepo(labels);
+        if (targetRepo) {
+          // Creamos la rama dinámicamente con su tipo y en el repo correcto
+          promises.push(createGithubBranch(issueType, issueKey, summary, targetRepo));
+        } else {
+          console.log(`No se creó rama para ${issueKey} porque no tiene una etiqueta válida de repositorio.`);
+        }
       }
     }
 
@@ -338,8 +369,12 @@ export default async function handler(req, res) {
       if (!typeLower.includes('epic') && !typeLower.includes('épica')) {
         const issueKey = payload.issue?.key || 'Desconocido';
         const summary = payload.issue?.fields?.summary || 'sin-resumen';
+        const labels = payload.issue?.fields?.labels || [];
         
-        promises.push(deleteGithubBranch(issueType, issueKey, summary));
+        const targetRepo = determineTargetRepo(labels);
+        if (targetRepo) {
+          promises.push(deleteGithubBranch(issueType, issueKey, summary, targetRepo));
+        }
       }
     }
 
