@@ -82,6 +82,53 @@ async function createGithubBranch(issueType, issueKey, summary) {
   }
 }
 
+async function deleteGithubBranch(issueType, issueKey, summary) {
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPO;
+  
+  if (!token || !repo) return;
+
+  const typeLower = issueType.toLowerCase();
+  let prefix = 'feature';
+  
+  if (typeLower.includes('bug') || typeLower.includes('error')) {
+    prefix = 'bugfix';
+  } else if (typeLower.includes('task') || typeLower.includes('tarea') || typeLower.includes('subtask')) {
+    prefix = 'task';
+  } else if (typeLower.includes('historia') || typeLower.includes('story')) {
+    prefix = 'story';
+  } else if (typeLower.includes('epic') || typeLower.includes('épica')) {
+    prefix = 'epic';
+  } else if (typeLower.includes('hotfix')) {
+    prefix = 'hotfix';
+  }
+
+  const cleanSummary = summary.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const branchName = `${prefix}/${issueKey}-${cleanSummary}`;
+
+  try {
+    const deleteResponse = await fetch(`https://api.github.com/repos/${repo}/git/refs/heads/${branchName}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+
+    if (!deleteResponse.ok) {
+      const errorText = await deleteResponse.text();
+      // Si el error es 404 Not Found, ignorarlo silenciosamente porque la rama ya no existía
+      if (!errorText.includes('Not Found')) {
+        console.error(`Error eliminando la rama ${branchName} en GitHub:`, errorText);
+      }
+    } else {
+      console.log(`Rama ${branchName} eliminada exitosamente en GitHub.`);
+    }
+  } catch (err) {
+    console.error("Error de red intentando eliminar la rama en GitHub:", err);
+  }
+}
+
 export default async function handler(req, res) {
   // Solo permitimos peticiones POST (que es lo que enviará el Webhook de Jira)
   if (req.method !== 'POST') {
@@ -280,6 +327,19 @@ export default async function handler(req, res) {
         
         // Creamos la rama dinámicamente con su tipo (Feature, Bug, Task, etc.)
         promises.push(createGithubBranch(issueType, issueKey, summary));
+      }
+    }
+
+    // Tarea 3: Eliminar rama en GitHub si se elimina la tarjeta en Jira
+    if (eventType === 'jira:issue_deleted') {
+      const issueType = payload.issue?.fields?.issuetype?.name || 'Task';
+      const typeLower = issueType.toLowerCase();
+      
+      if (!typeLower.includes('epic') && !typeLower.includes('épica')) {
+        const issueKey = payload.issue?.key || 'Desconocido';
+        const summary = payload.issue?.fields?.summary || 'sin-resumen';
+        
+        promises.push(deleteGithubBranch(issueType, issueKey, summary));
       }
     }
 
