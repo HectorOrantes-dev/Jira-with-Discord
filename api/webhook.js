@@ -8,7 +8,7 @@ export const config = {
   },
 };
 
-async function createGithubBranch(issueKey, summary) {
+async function createGithubBranch(issueType, issueKey, summary) {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO; // ej. "Usuario/Proyecto"
   
@@ -17,9 +17,25 @@ async function createGithubBranch(issueKey, summary) {
     return;
   }
 
+  // Determinar el prefijo de la rama basado en el tipo de tarea de Jira
+  const typeLower = issueType.toLowerCase();
+  let prefix = 'feature'; // Por defecto
+  
+  if (typeLower.includes('bug') || typeLower.includes('error')) {
+    prefix = 'bugfix';
+  } else if (typeLower.includes('task') || typeLower.includes('tarea') || typeLower.includes('subtask')) {
+    prefix = 'task';
+  } else if (typeLower.includes('historia') || typeLower.includes('story')) {
+    prefix = 'story';
+  } else if (typeLower.includes('epic') || typeLower.includes('épica')) {
+    prefix = 'epic';
+  } else if (typeLower.includes('hotfix')) {
+    prefix = 'hotfix';
+  }
+
   // Sanitizar el nombre de la rama: minúsculas, espacios por guiones, sin caracteres raros
   const cleanSummary = summary.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  const branchName = `feature/${issueKey}-${cleanSummary}`;
+  const branchName = `${prefix}/${issueKey}-${cleanSummary}`;
 
   try {
     // 1. Obtener el SHA de la rama 'qa'
@@ -252,13 +268,18 @@ export default async function handler(req, res) {
       })
     );
 
-    // Tarea 2: Crear rama en GitHub (si es una Feature/Historia creada)
+    // Tarea 2: Crear rama en GitHub según el tipo de incidencia
     if (eventType === 'jira:issue_created') {
-      const issueType = payload.issue?.fields?.issuetype?.name?.toLowerCase() || '';
-      if (issueType.includes('feature') || issueType.includes('historia') || issueType.includes('story')) {
+      const issueType = payload.issue?.fields?.issuetype?.name || 'Task';
+      const typeLower = issueType.toLowerCase();
+      
+      // Si la tarjeta es una Epic, NO creamos rama, ya que actúan solo como agrupadores
+      if (!typeLower.includes('epic') && !typeLower.includes('épica')) {
         const issueKey = payload.issue?.key || 'Desconocido';
         const summary = payload.issue?.fields?.summary || 'sin-resumen';
-        promises.push(createGithubBranch(issueKey, summary));
+        
+        // Creamos la rama dinámicamente con su tipo (Feature, Bug, Task, etc.)
+        promises.push(createGithubBranch(issueType, issueKey, summary));
       }
     }
 
