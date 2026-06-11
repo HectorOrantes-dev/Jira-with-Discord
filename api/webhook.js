@@ -8,6 +8,64 @@ export const config = {
   },
 };
 
+async function createGithubBranch(issueKey, summary) {
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPO; // ej. "Usuario/Proyecto"
+  
+  if (!token || !repo) {
+    console.error("Faltan credenciales de GitHub (GITHUB_TOKEN o GITHUB_REPO)");
+    return;
+  }
+
+  // Sanitizar el nombre de la rama: minúsculas, espacios por guiones, sin caracteres raros
+  const cleanSummary = summary.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  const branchName = `feature/${issueKey}-${cleanSummary}`;
+
+  try {
+    // 1. Obtener el SHA de la rama 'qa'
+    const qaRefResponse = await fetch(`https://api.github.com/repos/${repo}/git/ref/heads/qa`, {
+      headers: {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github.v3+json'
+      }
+    });
+
+    if (!qaRefResponse.ok) {
+      console.error("Error obteniendo la rama 'qa':", await qaRefResponse.text());
+      return;
+    }
+
+    const qaRefData = await qaRefResponse.json();
+    const qaSha = qaRefData.object.sha;
+
+    // 2. Crear la nueva rama desde el SHA de 'qa'
+    const createRefResponse = await fetch(`https://api.github.com/repos/${repo}/git/refs`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ref: `refs/heads/${branchName}`,
+        sha: qaSha
+      })
+    });
+
+    if (!createRefResponse.ok) {
+      const errorText = await createRefResponse.text();
+      // Si el error es Reference already exists (422), ignorarlo silenciosamente
+      if (!errorText.includes('Reference already exists')) {
+        console.error("Error creando la rama en GitHub:", errorText);
+      }
+    } else {
+      console.log(`Rama ${branchName} creada exitosamente en GitHub.`);
+    }
+  } catch (err) {
+    console.error("Error de red llamando a GitHub:", err);
+  }
+}
+
 export default async function handler(req, res) {
   // Solo permitimos peticiones POST (que es lo que enviará el Webhook de Jira)
   if (req.method !== 'POST') {
@@ -176,24 +234,41 @@ export default async function handler(req, res) {
     ]
   };
 
-  // 5. Envío a Discord
+  // 5. Envío a Discord y GitHub de manera Concurrente
   try {
-    const discordResponse = await fetch(discordWebhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(discordPayload)
-    });
+    const promises = [];
+    
+    // Tarea 1: Enviar mensaje a Discord
+    promises.push(
+      fetch(discordWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(discordPayload)
+      }).then(async discordResponse => {
+        if (!discordResponse.ok) {
+          const errorText = await discordResponse.text();
+          console.error("Error al enviar el mensaje a Discord:", errorText);
+        }
+      })
+    );
 
-    if (!discordResponse.ok) {
-      const errorText = await discordResponse.text();
-      console.error("Error al enviar el mensaje a Discord:", errorText);
-      return res.status(502).json({ error: 'Fallo al comunicar con Discord' });
+    // Tarea 2: Crear rama en GitHub (si es una Feature/Historia creada)
+    if (eventType === 'jira:issue_created') {
+      const issueType = payload.issue?.fields?.issuetype?.name?.toLowerCase() || '';
+      if (issueType.includes('feature') || issueType.includes('historia') || issueType.includes('story')) {
+        const issueKey = payload.issue?.key || 'Desconocido';
+        const summary = payload.issue?.fields?.summary || 'sin-resumen';
+        promises.push(createGithubBranch(issueKey, summary));
+      }
     }
 
+    // Ejecutar ambas promesas al mismo tiempo (Concurrencia)
+    await Promise.all(promises);
+
     // Todo ha ido bien
-    return res.status(200).json({ success: true, message: 'Evento procesado correctamente' });
+    return res.status(200).json({ success: true, message: 'Eventos procesados concurrentemente' });
   } catch (error) {
-    console.error("Error de conexión (Fetch) con Discord:", error);
-    return res.status(500).json({ error: 'Error interno de red al contactar con Discord' });
+    console.error("Error ejecutando tareas concurrentes:", error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 }
