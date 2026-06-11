@@ -12,14 +12,28 @@ export default async function handler(req, res) {
   }
 
   let rawBody = '';
-  for await (const chunk of req) {
-    rawBody += chunk;
+  
+  // En algunos entornos serverless, el body ya viene en req.body aunque le digamos que no lo parsee.
+  if (req.body && Object.keys(req.body).length > 0) {
+    rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  } else {
+    for await (const chunk of req) {
+      rawBody += chunk;
+    }
   }
+
+  console.log("Longitud del cuerpo recibido:", rawBody.length);
+  console.log("Primeros 100 caracteres del cuerpo:", rawBody.substring(0, 100));
 
   let payload;
   try {
+    if (!rawBody) {
+      console.error("El cuerpo de la petición está completamente vacío.");
+      return res.status(400).json({ error: 'Cuerpo vacío' });
+    }
     payload = JSON.parse(rawBody);
   } catch (e) {
+    console.error("Error al hacer JSON.parse. Error:", e.message);
     return res.status(400).json({ error: 'JSON inválido' });
   }
 
